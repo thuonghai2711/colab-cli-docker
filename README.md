@@ -1,13 +1,11 @@
 # colab-cli-docker
 
-Chạy [Google Colab CLI](https://github.com/googlecolab/google-colab-cli) trong Docker — quản lý session Colab (CPU/GPU/TPU) trực tiếp từ terminal.
+Chạy [Google Colab CLI](https://github.com/googlecolab/google-colab-cli) trong **Docker** — provision CPU/GPU/TPU runtimes, chạy code local, quản lý file remote và orchestrate cloud pipelines — trực tiếp từ terminal.
 
-## Tính năng
+> [!NOTE]
+> Repo này đóng gói `google-colab-cli` thành image Docker. Toàn bộ tài liệu sử dụng bên dưới được lấy từ [README gốc của googlecolab/google-colab-cli](https://github.com/googlecolab/google-colab-cli) và đã điều chỉnh lệnh sang dạng `docker run`.
 
-- 🐳 Image Docker nhẹ (`python:3.12-slim` + `google-colab-cli`)
-- 🚀 Tạo session Colab với CPU, GPU (T4/L4/G4/H100/A100) hoặc TPU (v5e/v6e)
-- 💻 Chạy script Python trên VM Colab, upload/download file, SSH vào runtime
-- 🔐 Xác thực OAuth2 Google (hoặc ADC)
+---
 
 ## Build image
 
@@ -15,70 +13,170 @@ Chạy [Google Colab CLI](https://github.com/googlecolab/google-colab-cli) trong
 docker build -t colab-cli:latest .
 ```
 
-## Sử dụng
+## Chạy trong Docker
 
-### Xem help
-
-```bash
-docker run --rm colab-cli:latest --help
-```
-
-### Tạo session mới (cần xác thực Google)
+Vì mỗi lệnh `docker run` là một container mới, **session state** (`~/.config/colab-cli/sessions.json`) cần được mount ra volume để giữ giữa các bước. Khuyến nghị dùng alias:
 
 ```bash
-# CPU
-docker run --rm -it colab-cli:latest new
-
-# GPU T4
-docker run --rm -it colab-cli:latest new --gpu T4
-
-# TPU v5e
-docker run --rm -it colab-cli:latest new --tpu v5e1
+alias colab='docker run --rm -it -v ~/.colab-cli:/root/.config/colab-cli colab-cli:latest'
 ```
 
-CLI sẽ in ra URL xác thực OAuth — mở trong trình duyệt, bấm **Approve**, rồi dán authorization code vào terminal.
+Sau đó mọi lệnh `colab ...` trong tài liệu bên dưới đều chạy được qua Docker.
 
-### Chạy script trên Colab VM (fresh VM, tự release sau khi xong)
+### Quick Start (Docker)
 
 ```bash
-docker run --rm -it -v $(pwd):/workspace colab-cli:latest run /workspace/script.py
+# 1. Tạo session CPU
+colab new
+
+# 2. Chạy code từ stdin
+echo "print('Hello from Google Colab!')" | colab exec
+
+# 3. Dừng và release VM
+colab stop
 ```
 
-### Các lệnh khác
+> [!NOTE]
+> Khi chỉ có một session đang chạy, bạn có thể bỏ qua `-s, --session`; CLI tự biết session nào.
 
-| Lệnh | Mô tả |
-|------|-------|
-| `colab sessions` | Liệt kê session đang chạy |
-| `colab status` | Xem trạng thái session |
-| `colab exec <code>` | Chạy code trong session |
-| `colab repl` | REPL tương tác |
-| `colab upload / download` | Truyền file với session |
-| `colab ssh` | SSH vào Colab runtime |
-| `colab drivemount` | Mount Google Drive |
-| `colab stop` | Dừng session |
+---
 
-## Xác thực
+## Key Features
 
-Hai phương thức:
+* **Instant VM Provisioning:** Spin up CPU, GPU (T4, L4, G4, H100, A100), or TPU (v5e1, v6e1) runtimes in seconds.
+* **Robust Code Execution:** Run local Python scripts, Jupyter Notebooks (`.ipynb`), or piped `stdin` code; launch interactive REPLs or raw TTY console shells.
+* **Ephemeral Job Runner (`colab run`):** Provision a fresh VM, execute a local script with forwarded arguments, retrieve output files, and automatically tear down the runtime in a single command.
+* **Automatic Keep-Alive:** Built-in background daemon automatically prevents idle VM termination, keeping resource allocations active without requiring open browser tabs.
+* **Seamless Workspace Automation:** Mount Google Drive, authenticate Google Cloud Platform (GCP) credentials, and install dependencies with high-performance `uv` package management.
+* **State & Log Archival:** Inspect local session states or export interactive history logs to standard Jupyter Notebooks, Markdown, or structured JSONL.
 
-1. **OAuth2** (mặc định) — flow tương tác, cần browser
-2. **ADC** (Application Default Credentials) — dùng cho CI/automation:
+---
+
+## Command Index
+
+Run `colab <command> --help` to view specific options, defaults, and detailed help.
+
+### Session Management
+| Command | Description |
+| --- | --- |
+| `colab new [-s NAME] [--gpu GPU] [--tpu TPU] [--high-mem]` | Allocate a new CPU, GPU, or TPU VM runtime (optionally high-RAM) |
+| `colab sessions` | List all active sessions currently active on the backend |
+| `colab status [-s NAME]` | Display hardware, machine shape, status, and local metadata for active sessions |
+| `colab restart-kernel [-s NAME]` | Restart the active session's Jupyter kernel |
+| `colab stop [-s NAME]` | Terminate a session VM and tear down its keep-alive daemon |
+| `colab url [-s NAME] [--open]` | Print or open a browser URL connecting to the active session |
+
+### Execution
+| Command | Description |
+| --- | --- |
+| `colab run [--gpu GPU] [--tpu TPU] [--high-mem] [--keep] SCRIPT [ARGS...]` | Run a local script on a fresh VM, forwarding arguments, then release it |
+| `colab exec [-s NAME] [-f FILE] [--output-image PATH]` | Execute Python code from stdin, a local `.py` file, or a `.ipynb` notebook |
+| `colab repl [-s NAME] [--output-image PATH]` | Start an interactive Python REPL on the VM (exits cleanly on piped EOF) |
+| `colab console [-s NAME]` | Connect to a raw interactive TTY shell (tmux) on the remote VM |
+| `colab ssh [-s NAME] [--proxy-mode] [-i KEY] [--gpu GPU] [--tpu TPU] [--high-mem]` | Open an SSH shell to the runtime over WebSocket, or act as an OpenSSH `ProxyCommand` bridge for IDE remote-dev |
+
+### File Operations
+| Command | Description |
+| --- | --- |
+| `colab ls [-s NAME] [PATH]` | List remote files on the VM |
+| `colab upload [-s NAME] LOCAL REMOTE` | Upload a local file to the VM filesystem |
+| `colab download [-s NAME] REMOTE LOCAL` | Download a remote file from the VM filesystem |
+| `colab rm [-s NAME] PATH` | Delete a remote file on the VM filesystem |
+| `colab edit [-s NAME] PATH` | Edit a remote file in-place using your local `$EDITOR` |
+
+### Automation & Utilities
+| Command | Description |
+| --- | --- |
+| `colab auth [-s NAME]` | Authenticate the VM for GCP services (BigQuery, GCS, etc.) |
+| `colab drivemount [-s NAME] [PATH]` | Mount Google Drive on the VM (default: `/content/drive`) |
+| `colab install [-s NAME] [-r FILE \| PKG...]` | Install packages on the VM using `uv` (falls back to `pip`) |
+| `colab log [-s NAME] [-n N] [-o FILE]` | View or export session history (`.ipynb`, `.md`, `.txt`, `.jsonl`) |
+| `colab pay` | Open the Colab subscription page to manage compute units |
+| `colab version` | Print the installed version of the CLI |
+| `colab update [--install]` | Check for a newer release (and optionally upgrade the CLI in place) |
+
+### Global Options
+* `--auth {oauth2,adc}` — Authentication strategy for the Colab API (default: `adc`).
+* `-c, --client-oauth-config PATH` — Path to public OAuth client credentials configuration (default: `~/.colab-cli-oauth-config.json`).
+* `--config PATH` — Path to local session metadata storage (default: `~/.config/colab-cli/sessions.json`).
+* `--logtostderr` — Direct debug logging output to stderr.
+
+---
+
+## Practical Examples
+
+### Accelerator Training with Checkpoint Retrieval
+
+Provision an A100 GPU, install requirements, run a local training script, retrieve the resulting model weights, and terminate the VM:
 
 ```bash
-docker run --rm -it \
-  -v ~/.config/gcloud:/root/.config/gcloud \
-  colab-cli:latest --auth adc new
+colab new -s trainer --gpu A100
+colab install -s trainer torch transformers
+colab exec -s trainer -f train.py
+colab download -s trainer checkpoints/model.bin ./model.bin
+colab stop -s trainer
 ```
 
-## Cấu trúc repo
+### Workspace Notebook Execution with Drive Integration
 
+Mount Google Drive, run a local notebook against the VM kernel (outputs are written back into `report_output.ipynb`), export a Markdown log of the execution, and clean up:
+
+```bash
+colab new -s analysis
+colab drivemount -s analysis
+colab exec -s analysis -f report.ipynb
+colab log -s analysis -o execution_log.md
+colab stop -s analysis
 ```
-colab-cli-docker/
-├── Dockerfile      # Image python:3.12-slim + google-colab-cli
-└── README.md
+
+---
+
+## Usage Notes
+
+* **Machine shape:** Use `--high-mem` with `colab new`, `colab run`, or `colab ssh` (when auto-creating a runtime) to request a high-RAM machine shape. Requires Colab Pro or Pro+ entitlement for supported accelerators (CPU, T4, A100, etc.). L4 and TPU runtimes ignore this flag because they only offer one shape. Machine shape is shown in `colab sessions` and `colab status`.
+* **TTY Requirements:** The interactive commands `repl` and `console` require a local TTY. When running inside automated scripts or pipelines, make sure to pipe stdin (e.g., `echo "print(1)" | colab repl`) to trigger non-interactive execution modes.
+* **Transparent Code Execution:** When calling `colab exec -f file.py`, the CLI reads the file locally and transmits its content to the remote kernel. You do not need to manually upload files before execution.
+* **Storage & State Paths:** Session tokens and metadata are stored at `~/.config/colab-cli/sessions.json`. Global CLI settings are located at `~/.config/colab-cli/settings.json`. These can be customized or isolated via the global `--config` flag.
+
+### Ephemeral Accelerator Jobs
+
+Use `colab run` to run a local script on dedicated hardware without manual session lifecycle management. The CLI handles provisioning, script execution, and immediate VM teardown automatically:
+
+```bash
+# Run train.py on a T4 GPU and release the VM on completion
+colab run --gpu T4 train.py
 ```
 
-## Tham khảo
+### Shebang Execution Support
 
-- [google-colab-cli (repo gốc)](https://github.com/googlecolab/google-colab-cli)
-- [Google Colab](https://colab.research.google.com/)
+To execute a local file directly on a remote accelerator, place the `colab run` interpreter in the shebang line:
+
+```python
+#!/usr/bin/env -S colab run --gpu L4 --keep
+import torch
+
+print("L4 GPU Available:", torch.cuda.is_available())
+print("Device Name:", torch.cuda.get_device_name(0))
+```
+
+Make the script executable (`chmod +x script.py`) and run it: `./script.py`. The `--keep` option tells the CLI to preserve the session VM on completion so you can re-execute or inspect logs.
+
+---
+
+## Deep Dive Documentation
+
+For comprehensive architectural overviews and deep-dives into specific CLI sub-systems, refer to the detailed documentation:
+
+* [Session Management & Keep-Alive Architecture](docs/01_session_management.md)
+* [Interactive & Non-Interactive Execution Design](docs/02_execution_and_interactive.md)
+* [File Management & Jupyter Contents API](docs/03_file_management.md)
+* [Authentication Providers & VM Automation](docs/04_automation_and_utility.md)
+* [Ephemeral Job Runner Design](docs/05_run_command.md)
+
+To view interactive walkthroughs of eleven real-world automated scenarios, check out the [Demo Walkthroughs](docs/demos.md).
+
+---
+
+## Contributing
+
+Feedback and contributions are welcome! Please read [`CONTRIBUTING.md`](./CONTRIBUTING.md) for details.
